@@ -567,6 +567,13 @@ services:
       #     - "10.0.0.2"
       #     - "8.8.8.8"
       dns: []
+      # Insecure (HTTP) registries for Docker daemon — required for Harbor without TLS.
+      # Add the registry hostname (or hostname:port). The runner DaemonSet writes these
+      # to /etc/docker/daemon.json on the host node via the dockerInstaller init container.
+      # Example:
+      #   insecureRegistries:
+      #     - "harbor.internal.svc.cluster.local"
+      insecureRegistries: []
       # Airgapped mode - use pre-packaged dependencies instead of downloading from internet
       airgapped:
         enabled: false
