@@ -273,6 +273,14 @@ spec:
               value: {{ .Values.minio.rootUser | quote }}
             - name: S3_SECRET_KEY
               value: {{ .Values.minio.rootPassword | quote }}
+            - name: S3_REGION
+              value: {{ .Values.services.api.env.S3_REGION | default "us-east-1" | quote }}
+            - name: S3_DEFAULT_BUCKET
+              value: {{ (index .Values.minio.buckets 0).name | default "daytona" | quote }}
+            - name: S3_ACCOUNT_ID
+              value: ""
+            - name: S3_ROLE_NAME
+              value: ""
             {{- else }}
             - name: S3_ENDPOINT
               value: {{ .Values.services.api.env.S3_ENDPOINT | default "" | quote }}
