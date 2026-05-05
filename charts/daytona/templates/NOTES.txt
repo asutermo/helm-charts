@@ -38,12 +38,20 @@
 {{- end }}
 {{ end }}
 
-2. 🐳 Harbor Portal (Container Registry):
+{{- $sectionNum := 1 }}
+{{- if .Values.harbor.enabled }}
+{{- $sectionNum = add $sectionNum 1 }}
+{{ $sectionNum }}. 🐳 Harbor Portal (Container Registry):
    # Web UI: {{ .Values.harbor.externalURL }}
    # Username: admin
    # Password: {{ .Values.harbor.harborAdminPassword }}
+{{- else if .Values.garRegistryRefresh.enabled }}
+{{- $sectionNum = add $sectionNum 1 }}
+{{ $sectionNum }}. 🐳 External Registry:
+   # Daytona registry backend: GAR
+   # URL: {{ .Values.garRegistryRefresh.registry.url | default .Values.services.api.env.INTERNAL_REGISTRY_URL }}/{{ .Values.garRegistryRefresh.registry.project | default .Values.services.api.env.INTERNAL_REGISTRY_PROJECT_ID }}
+{{- end }}
 
-{{- $sectionNum := 2 }}
 {{- if .Values.minio.enabled }}
 {{- $sectionNum = add $sectionNum 1 }}
 {{ $sectionNum }}. 📦 MinIO Console (Object Storage):

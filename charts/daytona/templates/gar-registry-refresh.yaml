@@ -1,0 +1,235 @@
+{{- define "daytona.garRegistryRefresh.podSpec" -}}
+{{- $registryUrl := .Values.garRegistryRefresh.registry.url | default .Values.services.api.env.INTERNAL_REGISTRY_URL -}}
+{{- $registryProject := .Values.garRegistryRefresh.registry.project | default .Values.services.api.env.INTERNAL_REGISTRY_PROJECT_ID -}}
+{{- if not $registryUrl -}}
+{{- fail "garRegistryRefresh.registry.url or services.api.env.INTERNAL_REGISTRY_URL is required when garRegistryRefresh.enabled=true" -}}
+{{- end -}}
+{{- if not $registryProject -}}
+{{- fail "garRegistryRefresh.registry.project or services.api.env.INTERNAL_REGISTRY_PROJECT_ID is required when garRegistryRefresh.enabled=true" -}}
+{{- end -}}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+serviceAccountName: {{ include "daytona.garRegistryRefresh.serviceAccountName" . }}
+restartPolicy: {{ .Values.garRegistryRefresh.restartPolicy }}
+{{- with .Values.podSecurityContext }}
+securityContext:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+containers:
+  - name: gar-registry-refresh
+    image: "{{ .Values.garRegistryRefresh.image.registry }}/{{ .Values.garRegistryRefresh.image.repository }}:{{ .Values.garRegistryRefresh.image.tag }}"
+    imagePullPolicy: {{ .Values.garRegistryRefresh.image.pullPolicy }}
+    command: ["/bin/sh", "-ec"]
+    args:
+      - |
+        TOKEN_JSON="$(wget -q -O - --header='Metadata-Flavor: Google' "${TOKEN_URL}")"
+        REGISTRY_PASSWORD="$(
+          printf '%s' "${TOKEN_JSON}" \
+            | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+        )"
+        if [ -z "${REGISTRY_PASSWORD}" ]; then
+          echo "failed to obtain GAR access token from metadata server" >&2
+          exit 1
+        fi
+
+        export PGPASSWORD="${DB_PASSWORD}"
+        sql_literal() {
+          printf '%s' "$1" | sed "s/'/''/g"
+        }
+        REGISTRY_URL_SQL="$(sql_literal "${REGISTRY_URL}")"
+        REGISTRY_USERNAME_SQL="$(sql_literal "${REGISTRY_USERNAME}")"
+        REGISTRY_PASSWORD_SQL="$(sql_literal "${REGISTRY_PASSWORD}")"
+        REGISTRY_PROJECT_SQL="$(sql_literal "${REGISTRY_PROJECT}")"
+
+        psql \
+          -v ON_ERROR_STOP=1 \
+          -c "
+        WITH registry_values(registry_type, registry_name, is_fallback) AS (
+          VALUES
+            ('internal', 'Internal Registry', false),
+            ('transient', 'Transient Registry', false),
+            ('backup', 'Backup Registry', true)
+        ),
+        updated AS (
+          UPDATE docker_registry AS d
+          SET
+            url = '${REGISTRY_URL_SQL}',
+            username = '${REGISTRY_USERNAME_SQL}',
+            password = '${REGISTRY_PASSWORD_SQL}',
+            project = '${REGISTRY_PROJECT_SQL}',
+            \"updatedAt\" = now()
+          FROM registry_values AS v
+          WHERE d.\"registryType\" = v.registry_type::docker_registry_registrytype_enum
+            AND d.\"organizationId\" IS NULL
+            AND NOT (d.url = 'docker.io' AND d.project = '')
+          RETURNING d.id
+        ),
+        inserted AS (
+          INSERT INTO docker_registry (
+            name,
+            url,
+            username,
+            password,
+            \"isDefault\",
+            \"isFallback\",
+            project,
+            \"registryType\",
+            \"organizationId\",
+            region,
+            \"createdAt\",
+            \"updatedAt\"
+          )
+          SELECT
+            v.registry_name,
+            '${REGISTRY_URL_SQL}',
+            '${REGISTRY_USERNAME_SQL}',
+            '${REGISTRY_PASSWORD_SQL}',
+            true,
+            v.is_fallback,
+            '${REGISTRY_PROJECT_SQL}',
+            v.registry_type::docker_registry_registrytype_enum,
+            null,
+            null,
+            now(),
+            now()
+          FROM registry_values AS v
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM docker_registry AS d
+            WHERE d.\"registryType\" = v.registry_type::docker_registry_registrytype_enum
+              AND d.\"organizationId\" IS NULL
+              AND d.\"isDefault\" = true
+              AND NOT (d.url = 'docker.io' AND d.project = '')
+          )
+          RETURNING id
+        )
+        SELECT
+          'updated=' || (SELECT count(*) FROM updated)::text ||
+          ' inserted=' || (SELECT count(*) FROM inserted)::text AS gar_registry_refresh;
+        " \
+          "host=${DB_HOST} port=${DB_PORT} dbname=${DB_DATABASE} user=${DB_USERNAME} sslmode=${DB_SSLMODE}"
+    env:
+      - name: TOKEN_URL
+        value: {{ .Values.garRegistryRefresh.tokenUrl | quote }}
+      - name: REGISTRY_URL
+        value: {{ $registryUrl | quote }}
+      - name: REGISTRY_USERNAME
+        value: {{ .Values.garRegistryRefresh.registry.username | default "oauth2accesstoken" | quote }}
+      - name: REGISTRY_PROJECT
+        value: {{ $registryProject | quote }}
+      {{- if .Values.postgresql.enabled }}
+      - name: DB_HOST
+        value: {{ printf "%s-postgresql" .Release.Name | quote }}
+      - name: DB_PORT
+        value: "5432"
+      - name: DB_DATABASE
+        value: {{ .Values.postgresql.auth.database | default "daytona" | quote }}
+      - name: DB_USERNAME
+        value: {{ .Values.postgresql.auth.username | default "user" | quote }}
+      - name: DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: {{ printf "%s-postgresql" .Release.Name }}
+            key: password
+      {{- else }}
+      - name: DB_HOST
+        value: {{ .Values.externalDatabase.host | default (.Values.services.api.env.DB_HOST | default "") | quote }}
+      - name: DB_PORT
+        value: {{ .Values.externalDatabase.port | default (.Values.services.api.env.DB_PORT | default "5432") | quote }}
+      - name: DB_DATABASE
+        value: {{ .Values.externalDatabase.name | default (.Values.services.api.env.DB_DATABASE | default "") | quote }}
+      - name: DB_USERNAME
+        value: {{ .Values.externalDatabase.user | default (.Values.services.api.env.DB_USERNAME | default "") | quote }}
+      {{- if .Values.externalDatabase.existingSecret }}
+      - name: DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: {{ .Values.externalDatabase.existingSecret | quote }}
+            key: database-password
+      {{- else }}
+      - name: DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: {{ include "daytona.secretName" . }}-db
+            key: database-password
+      {{- end }}
+      {{- end }}
+      - name: DB_SSLMODE
+        value: {{ .Values.garRegistryRefresh.dbSslMode | default "prefer" | quote }}
+    {{- with .Values.garRegistryRefresh.resources }}
+    resources:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- with .Values.garRegistryRefresh.nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.garRegistryRefresh.affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.garRegistryRefresh.tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{- if and .Values.garRegistryRefresh.enabled (not .Values.harbor.enabled) .Values.garRegistryRefresh.runOnInstall }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  namespace: {{ include "daytona.namespace" . }}
+  name: {{ printf "%s-gar-registry-refresh" (include "daytona.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "daytona.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gar-registry-refresh
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.garRegistryRefresh.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "daytona.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gar-registry-refresh
+      {{- with .Values.garRegistryRefresh.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+{{ include "daytona.garRegistryRefresh.podSpec" . | nindent 6 }}
+---
+{{- end }}
+{{- if and .Values.garRegistryRefresh.enabled (not .Values.harbor.enabled) }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  namespace: {{ include "daytona.namespace" . }}
+  name: {{ printf "%s-gar-registry-refresh" (include "daytona.fullname" .) | trunc 52 | trimSuffix "-" }}
+  labels:
+    {{- include "daytona.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gar-registry-refresh
+spec:
+  schedule: {{ .Values.garRegistryRefresh.schedule | quote }}
+  suspend: {{ .Values.garRegistryRefresh.suspend }}
+  successfulJobsHistoryLimit: {{ .Values.garRegistryRefresh.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.garRegistryRefresh.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.garRegistryRefresh.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "daytona.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: gar-registry-refresh
+          {{- with .Values.garRegistryRefresh.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+{{ include "daytona.garRegistryRefresh.podSpec" . | nindent 10 }}
+{{- end }}

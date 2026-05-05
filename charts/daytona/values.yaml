@@ -301,6 +301,8 @@ services:
       PROXY_DOMAIN: ""
       PROXY_API_KEY: "super_secret_key"
       PROXY_PROTOCOL: http
+      OIDC_DOMAIN: ""
+      OIDC_PUBLIC_DOMAIN: ""
       OIDC_CLIENT_SECRET: ""
     # Extra environment variables (for valueFrom or additional custom vars)
     extraEnv: []
@@ -524,7 +526,8 @@ services:
       AWS_REGION: ""
       AWS_ENDPOINT_URL: ""
       AWS_ACCESS_KEY_ID: ""
-      AWS_SECRET_ACCESS_KEY: ""
+      AWS_SECRET_ACCESS_KEY:
+        value: ""
       AWS_DEFAULT_BUCKET: ""
       # The same value as the .Values.services.sshGateway.sshKeys.pubClientSSHKey
       SSH_PUBLIC_KEY: "c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSUw0Q2hWRG8wZFZDdDFMVHBZaWpTblNOOVgyNDhBbTBBVXRlSUJGTWUzOTUgY2xpZW50LWtleQo="
@@ -582,6 +585,16 @@ services:
         packagesImage: "daytonaio/daytona-runner-packages:v0.0.2"
     # Extra environment variables (for valueFrom or additional custom vars)
     extraEnv: []
+    # Optional runner process override. This is needed when the runner image
+    # entrypoint starts a runtime that is already installed on the host node.
+    command: []
+    args: []
+    # Mount the host Docker socket even when CONTAINER_RUNTIME is set to a
+    # non-docker runtime such as sysbox-runc.
+    hostDockerSocket:
+      enabled: false
+    # Override the runner liveness probe.
+    livenessProbe: {}
     # Extra volume mounts for the container (e.g. Secrets Store CSI Driver)
     extraVolumeMounts: []
     # Extra volumes for the pod (e.g. Secrets Store CSI Driver)
@@ -624,6 +637,45 @@ externalDatabase:
   password: "pass"
   # If existingSecret is provided, it should contain key: database-password
   existingSecret: ""
+
+# External Registry Configuration
+# Used by existing-secret registry password wiring when `harbor.enabled=false`.
+externalRegistry:
+  existingSecret: ""
+  existingSecretPasswordKey: registry-password
+
+# GAR registry credential refresh.
+# This is only needed when `harbor.enabled=false` and the external registry is
+# Google Artifact Registry authenticated with short-lived OAuth tokens.
+garRegistryRefresh:
+  enabled: false
+  schedule: "*/30 * * * *"
+  suspend: false
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  restartPolicy: Never
+  runOnInstall: true
+  googleServiceAccount: ""
+  tokenUrl: "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+  image:
+    registry: docker.io
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  registry:
+    url: ""
+    project: ""
+    username: "oauth2accesstoken"
+  podAnnotations: {}
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 # External Redis Configuration
 # All of these values are only used if `redis.enabled=false`
@@ -699,6 +751,10 @@ dex:
   config:
     # Issuer URL (auto-generated if not set)
     issuer: ""
+    # Optional issuer rendered into Dex's browser-facing ConfigMap. Use this
+    # when services should validate tokens against an internal issuer but
+    # browsers must discover a different public/port-forward URL.
+    publicIssuer: ""
     # OIDC client ID
     clientId: "daytona"
     # Client name
@@ -720,6 +776,13 @@ dex:
         username: "admin"
         password: "$2y$10$pQ8jbpk6RWHx/uYJtDey.uCTzVl2ZXg569tp63PE9uisbCYzoARW6"
         userID: "1234"
+    storage:
+      type: sqlite3
+      config:
+        file: /var/dex/dex.db
+    oauth2: {}
+    connectors: []
+    enablePasswordDB: true
 
 # Redis configuration
 redis:

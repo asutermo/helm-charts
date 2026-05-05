@@ -19,15 +19,22 @@ data:
     {{- else -}}
       {{- $dexIssuer = printf "http://%s-dex:%s/dex" (include "daytona.fullname" .) (.Values.dex.service.port | default 5556 | toString) -}}
     {{- end }}
-    issuer: {{ $dexIssuer }}
+    {{- $dexConfigIssuer := .Values.dex.config.publicIssuer | default $dexIssuer }}
+    issuer: {{ $dexConfigIssuer }}
     storage:
-      type: sqlite3
+      type: {{ .Values.dex.config.storage.type | default "sqlite3" }}
+      {{- with .Values.dex.config.storage.config }}
       config:
-        file: /var/dex/dex.db
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     web:
       http: 0.0.0.0:{{ .Values.dex.service.port | default 5556 }}
       allowedOrigins: {{ .Values.dex.config.allowedOrigins | default (list "*") | toJson }}
       allowedHeaders: {{ .Values.dex.config.allowedHeaders | default (list "x-requested-with") | toJson }}
+    {{- with .Values.dex.config.oauth2 }}
+    oauth2:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     staticClients:
       - id: {{ .Values.dex.config.clientId | default "daytona" }}
         redirectURIs:
@@ -56,7 +63,16 @@ data:
           {{- end }}
         name: {{ .Values.dex.config.clientName | default "Daytona" | quote }}
         public: true
-    enablePasswordDB: true
+    {{- with .Values.dex.config.connectors }}
+    connectors:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- $enablePasswordDB := true }}
+    {{- if hasKey .Values.dex.config "enablePasswordDB" }}
+      {{- $enablePasswordDB = .Values.dex.config.enablePasswordDB }}
+    {{- end }}
+    enablePasswordDB: {{ $enablePasswordDB }}
+    {{- if and $enablePasswordDB .Values.dex.config.staticPasswords }}
     staticPasswords:
       {{- range .Values.dex.config.staticPasswords | default (list (dict "email" "dev@daytona.io" "password" "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W" "username" "admin" "userID" "1234")) }}
       - email: {{ .email | quote }}
@@ -64,4 +80,5 @@ data:
         username: {{ .username | quote }}
         userID: {{ .userID | quote }}
       {{- end }}
+    {{- end }}
 {{- end }}

@@ -95,22 +95,24 @@ spec:
             # OIDC Configuration
             {{- if .Values.dex.enabled }}
             # Dex is enabled - use Dex configuration
-            {{- $dexHostname := .Values.dex.ingress.hostname | default (printf "dex.%s" .Values.baseDomain) -}}
-            {{- $templatedDexHostname := tpl $dexHostname $ -}}
-            {{- $dexIssuerUrl := "" -}}
-            {{- if .Values.dex.config.issuer -}}
-              {{- $dexIssuerUrl = .Values.dex.config.issuer -}}
-            {{- else if and .Values.dex.enabled .Values.dex.ingress.enabled -}}
-              {{- $dexIssuerUrl = printf "https://%s/dex" $templatedDexHostname -}}
-            {{- else -}}
-              {{- $dexIssuerUrl = printf "http://%s-dex:%s/dex" (include "daytona.fullname" .) (.Values.dex.service.port | default 5556 | toString) -}}
+            {{- $dexHostname := .Values.dex.ingress.hostname | default (printf "dex.%s" .Values.baseDomain) }}
+            {{- $templatedDexHostname := tpl $dexHostname $ }}
+            {{- $dexIssuerUrl := "" }}
+            {{- if .Values.dex.config.issuer }}
+              {{- $dexIssuerUrl = .Values.dex.config.issuer }}
+            {{- else if and .Values.dex.enabled .Values.dex.ingress.enabled }}
+              {{- $dexIssuerUrl = printf "https://%s/dex" $templatedDexHostname }}
+            {{- else }}
+              {{- $dexIssuerUrl = printf "http://%s-dex:%s/dex" (include "daytona.fullname" .) (.Values.dex.service.port | default 5556 | toString) }}
             {{- end }}
-            {{- $dexPublicUrl := "" -}}
-            {{- if and .Values.dex.enabled .Values.dex.ingress.enabled -}}
-              {{- $dexPublicUrl = printf "https://%s/dex" $templatedDexHostname -}}
-            {{- else -}}
-              {{- $dexPublicUrl = "http://localhost:5556/dex" -}}
+            {{- $dexPublicUrl := "" }}
+            {{- if and .Values.dex.enabled .Values.dex.ingress.enabled }}
+              {{- $dexPublicUrl = printf "https://%s/dex" $templatedDexHostname }}
+            {{- else }}
+              {{- $dexPublicUrl = "http://localhost:5556/dex" }}
             {{- end }}
+            {{- $dexIssuerUrl = .Values.services.proxy.env.OIDC_DOMAIN | default $dexIssuerUrl }}
+            {{- $dexPublicUrl = .Values.services.proxy.env.OIDC_PUBLIC_DOMAIN | default .Values.dex.config.publicIssuer | default .Values.services.api.env.PUBLIC_OIDC_DOMAIN | default $dexPublicUrl }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.dex.config.clientId | default "daytona" | quote }}
             - name: OIDC_CLIENT_SECRET

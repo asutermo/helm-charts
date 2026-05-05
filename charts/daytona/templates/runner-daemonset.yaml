@@ -548,6 +548,14 @@ spec:
           imagePullPolicy: {{ .Values.services.runner.image.pullPolicy }}
           securityContext:
             privileged: true
+          {{- with .Values.services.runner.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.services.runner.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: api
               containerPort: 3000
@@ -597,7 +605,16 @@ spec:
             - name: AWS_ACCESS_KEY_ID
               value: {{ .Values.services.runner.env.AWS_ACCESS_KEY_ID | default "" | quote }}
             - name: AWS_SECRET_ACCESS_KEY
+              {{- if kindIs "map" .Values.services.runner.env.AWS_SECRET_ACCESS_KEY }}
+              {{- if .Values.services.runner.env.AWS_SECRET_ACCESS_KEY.valueFrom }}
+              valueFrom:
+                {{- toYaml .Values.services.runner.env.AWS_SECRET_ACCESS_KEY.valueFrom | nindent 16 }}
+              {{- else }}
+              value: {{ .Values.services.runner.env.AWS_SECRET_ACCESS_KEY.value | default "" | quote }}
+              {{- end }}
+              {{- else }}
               value: {{ .Values.services.runner.env.AWS_SECRET_ACCESS_KEY | default "" | quote }}
+              {{- end }}
             - name: AWS_DEFAULT_BUCKET
               value: {{ .Values.services.runner.env.AWS_DEFAULT_BUCKET | default "" | quote }}
             - name: SSH_PUBLIC_KEY
@@ -623,7 +640,8 @@ spec:
             {{- include "daytona.tplvalues.render" (dict "value" .Values.services.runner.extraEnv "context" $) | nindent 12 }}
             {{- end }}
           volumeMounts:
-            {{- if eq (.Values.services.runner.env.CONTAINER_RUNTIME | default "docker") "docker" }}
+            {{- $mountDockerSocket := .Values.services.runner.hostDockerSocket.enabled | default (eq (.Values.services.runner.env.CONTAINER_RUNTIME | default "docker") "docker") -}}
+            {{- if $mountDockerSocket }}
             - name: docker-socket
               mountPath: /var/run/
             {{- else }}
@@ -650,6 +668,10 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.services.runner.resources | nindent 12 }}
+          {{- if .Values.services.runner.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.services.runner.livenessProbe | nindent 12 }}
+          {{- else }}
           livenessProbe:
             httpGet:
               path: /
@@ -658,6 +680,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /

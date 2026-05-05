@@ -75,6 +75,18 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Create the name of the GAR registry refresh service account.
+*/}}
+{{- define "daytona.garRegistryRefresh.serviceAccountName" -}}
+{{- $serviceAccount := .Values.garRegistryRefresh.serviceAccount | default dict -}}
+{{- if ($serviceAccount.create | default true) -}}
+{{- default (printf "%s-gar-registry-refresh" (include "daytona.fullname" .) | trunc 63 | trimSuffix "-") $serviceAccount.name }}
+{{- else }}
+{{- default "default" $serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
 Allow the release namespace to be overridden for multi-namespace deployments in combined charts.
 */}}
 {{- define "daytona.namespace" -}}

@@ -187,6 +187,25 @@ When Harbor is enabled, registry URLs and credentials are automatically configur
 - `INTERNAL_REGISTRY_PASSWORD`: Internal registry admin password | `""`
 - `INTERNAL_REGISTRY_PROJECT_ID`: Internal registry project ID | `""`
 
+### GAR Registry Refresh
+
+Use this when `harbor.enabled=false` and the external registry is Google
+Artifact Registry authenticated with short-lived OAuth tokens. The refresh job
+uses the pod's Workload Identity to fetch an access token from the GKE metadata
+server, then upserts Daytona's default `internal`, `transient`, and `backup`
+registry rows in Postgres. It does not restart the Daytona API.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `garRegistryRefresh.enabled` | Enable GAR registry credential refresh CronJob | `false` |
+| `garRegistryRefresh.schedule` | Cron schedule for token refresh | `"*/30 * * * *"` |
+| `garRegistryRefresh.suspend` | Suspend the GAR registry credential refresh CronJob | `false` |
+| `garRegistryRefresh.googleServiceAccount` | Google service account email for the refresh KSA Workload Identity annotation | `""` |
+| `garRegistryRefresh.registry.url` | GAR registry URL, defaults to `services.api.env.INTERNAL_REGISTRY_URL` | `""` |
+| `garRegistryRefresh.registry.project` | GAR project/repository, defaults to `services.api.env.INTERNAL_REGISTRY_PROJECT_ID` | `""` |
+| `garRegistryRefresh.registry.username` | Docker username written into Daytona registry rows | `"oauth2accesstoken"` |
+| `garRegistryRefresh.runOnInstall` | Run an immediate post-install/post-upgrade refresh hook | `true` |
+
 **S3 Configuration (MinIO):**
 **Note:** MinIO is disabled by default (`minio.enabled=false`). Currently, Declarative Builder File System Operations and Volumes features are not supported in self-hosted Daytona. If MinIO is enabled, S3 endpoint and credentials are automatically configured. If using external S3 storage, disable MinIO and set these values:
 - `S3_ENDPOINT`: S3 endpoint URL | `""`
